@@ -1,0 +1,71 @@
+
+using StackExchange.Redis;
+
+namespace nbt
+{
+    public class RedisLockManager : IDisposable
+    {
+        private readonly ConnectionMultiplexer _redis;
+        private readonly IDatabase _database;
+
+        public RedisLockManager(string connectionString)
+        {
+            _redis = ConnectionMultiplexer.Connect(connectionString);
+            _database = _redis.GetDatabase();
+        }
+
+        public bool CheckLock(string _lockKey, int _maxNumber)
+        {
+            Console.WriteLine("Run check lock");
+            var script = @"
+                    local currentValue = tonumber(redis.call('GET', KEYS[1]))
+                    if (currentValue == nil or currentValue < tonumber(ARGV[1])) then
+                        redis.call('INCRBY', KEYS[1], 1)
+                        return true
+                    else
+                        return false
+                    end
+                ";
+
+
+            var result = (bool)_database.ScriptEvaluate(script, new RedisKey[] { _lockKey }, new RedisValue[] { _maxNumber });
+
+            return result;
+        }
+        public async Task<bool> CheckLockAsync(string _lockKey, int _maxNumber)
+        {
+            var script = @"
+                    local currentValue = tonumber(redis.call('GET', KEYS[1]))
+                    if (currentValue == nil or currentValue < tonumber(ARGV[1])) then
+                        redis.call('INCRBY', KEYS[1], 1)
+                        return true
+                    else
+                        return false
+                    end
+                ";
+
+            var result = await _database.ScriptEvaluateAsync(script, new RedisKey[] { _lockKey }, new RedisValue[] { _maxNumber });
+
+            return (bool)result;
+        }
+
+        public async Task ReleaseLockAsync(string _lockKey)
+        {
+            await _database.StringDecrementAsync(_lockKey);
+        }
+        public void ReleaseLock(string _lockKey)
+        {
+            _database.StringDecrement(_lockKey);
+        }
+        public async Task DeleteLockAsync(string _lockKey)
+        {
+            await _database.KeyDeleteAsync(_lockKey);
+        }
+
+        public void Dispose()
+        {
+            _redis.Close();
+            _redis.Dispose();
+        }
+    }
+}
